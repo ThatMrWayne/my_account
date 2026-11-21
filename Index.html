@@ -12,9 +12,12 @@ h1 {margin:0;font-size:clamp(2rem,6vw,3.4rem);letter-spacing:-.06em}
 h2 {margin:0;font-size:1.25rem}
 button {background:#244638;color:white;border:0;padding:.8rem 1.2rem;border-radius:.55rem;font:inherit;cursor:pointer}
 button:disabled {opacity:.65;cursor:wait}
-select {background:white;color:#203631;border:1px solid #b8c9bb;padding:.7rem .85rem;border-radius:.5rem;font:inherit}
+select,input[type=date] {background:white;color:#203631;border:1px solid #b8c9bb;padding:.7rem .85rem;border-radius:.5rem;font:inherit}
 #status {min-height:1.5em;color:#465d51}
-.filters {display:flex;align-items:center;gap:.75rem;margin:1.5rem 0 .75rem}
+.filters {display:flex;align-items:center;flex-wrap:wrap;gap:1rem 1.5rem;margin:1.5rem 0 .75rem}
+.filter-group {display:flex;align-items:center;gap:.75rem}
+.filter-group label {padding-block:.35rem}
+input[type=radio] {accent-color:#244638}
 .summary {background:#e3eddf;padding:1.35rem;border-radius:.75rem;margin:1.5rem 0;justify-content:flex-start;gap:3rem}
 .summary strong {display:block;font-size:1.8rem;margin-top:.3rem}
 section {background:white;border:1px solid #dce5d9;border-radius:.75rem;padding:1.2rem}
@@ -31,12 +34,22 @@ th:nth-child(6),td:nth-child(6) {text-align:right}
 <p id="status" role="status">讀取中…</p>
 <main id="results" hidden>
   <div class="filters">
-    <label for="month">查看月份</label>
-    <select id="month" aria-label="選擇月份"></select>
+    <div class="filter-group" role="radiogroup" aria-label="查詢方式" id="query-mode">
+      <label><input type="radio" name="period" value="month" checked> 依月份</label>
+      <label><input type="radio" name="period" value="day" id="daily"> 依日期</label>
+    </div>
+    <div class="filter-group" id="month-filter">
+      <label for="month">查看月份</label>
+      <select id="month" aria-label="選擇月份"></select>
+    </div>
+    <div class="filter-group" id="day-filter" hidden>
+      <label for="day">查看日期</label>
+      <input type="date" id="day">
+    </div>
   </div>
   <div class="summary">
-    <div>當月支出<strong id="month-total"></strong></div>
-    <div>當月筆數<strong id="month-count"></strong></div>
+    <div><span id="total-label">當月支出</span><strong id="month-total"></strong></div>
+    <div><span id="count-label">當月筆數</span><strong id="month-count"></strong></div>
   </div>
   <section aria-labelledby="entries">
     <h2 id="entries">支出明細</h2>
@@ -56,11 +69,20 @@ const taipei = new Intl.DateTimeFormat('zh-TW', {timeZone:'Asia/Taipei',month:'n
 const refresh = byId('refresh');
 const statusLine = byId('status');
 const monthSelect = byId('month');
+const dayInput = byId('day');
+const taipeiDate = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit'});
+dayInput.value = taipeiDate.format(new Date());
 let lastRead = '';
 let entries = [];
 function renderEntries() {
-  const selectedMonth = monthSelect.value;
-  const visibleEntries = entries.filter(entry => entry.date.slice(0, 7) === selectedMonth);
+  const daily = byId('daily').checked;
+  byId('month-filter').hidden = daily;
+  byId('day-filter').hidden = !daily;
+  byId('total-label').textContent = daily ? '當日支出' : '當月支出';
+  byId('count-label').textContent = daily ? '當日筆數' : '當月筆數';
+  const visibleEntries = daily
+    ? entries.filter(entry => entry.date === dayInput.value)
+    : entries.filter(entry => entry.date.slice(0, 7) === monthSelect.value);
   const fragment = document.createDocumentFragment();
   for (const entry of visibleEntries) {
     const row = document.createElement('tr');
@@ -72,15 +94,18 @@ function renderEntries() {
   byId('transactions').replaceChildren(fragment);
   byId('month-total').textContent = currency.format(visibleEntries.reduce((sum, entry) => sum + entry.amount, 0));
   byId('month-count').textContent = visibleEntries.length;
+  byId('empty').textContent = daily && !dayInput.value ? '請選擇日期。' : '目前沒有支出紀錄。';
   byId('empty').hidden = visibleEntries.length > 0;
   byId('table-wrap').hidden = visibleEntries.length === 0;
 }
 function render(result) {
   const previousMonth = monthSelect.value;
   entries = result.entries;
-  const months = [...new Set(entries.map(entry => entry.date.slice(0, 7)))].sort().reverse();
-  const currentMonth = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Taipei',year:'numeric',month:'2-digit'}).format(new Date());
-  if (months.length === 0) months.push(currentMonth);
+  const availableMonths = new Set(entries.map(entry => entry.date.slice(0, 7)));
+  const currentMonth = taipeiDate.format(new Date()).slice(0, 7);
+  if (previousMonth) availableMonths.add(previousMonth);
+  if (!availableMonths.size) availableMonths.add(currentMonth);
+  const months = [...availableMonths].sort().reverse();
   monthSelect.replaceChildren(...months.map(month => {
     const option = document.createElement('option');
     option.value = month;
@@ -88,7 +113,7 @@ function render(result) {
     option.textContent = year + ' 年 ' + Number(number) + ' 月';
     return option;
   }));
-  monthSelect.value = months.includes(previousMonth) ? previousMonth : (months.includes(currentMonth) ? currentMonth : months[0]);
+  monthSelect.value = previousMonth || (availableMonths.has(currentMonth) ? currentMonth : months[0]);
   renderEntries();
   byId('results').hidden = false;
   lastRead = taipei.format(new Date(result.fetchedAt));
@@ -105,6 +130,8 @@ function load() {
   google.script.run.withSuccessHandler(render).withFailureHandler(failed).readLedger();
 }
 refresh.addEventListener('click', load);
+byId('query-mode').addEventListener('change', renderEntries);
+dayInput.addEventListener('input', renderEntries);
 monthSelect.addEventListener('change', renderEntries);
 load();
 </script>

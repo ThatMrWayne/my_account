@@ -69,6 +69,59 @@ test('首次讀取失敗時提供重試', async ({ page, ledger }) => {
   await expectMonth(page, '2025-02', ['晨光早餐店'], '$45');
 });
 
+test('依日期精確篩選同日多筆，切回月份時還原月摘要', async ({ page, ledger }) => {
+  const extra = { ...january, merchant: '紙品小舖', amount: 25.5 };
+  await ledger.success([...entries, extra]);
+  await month(page).selectOption('2025-01');
+  await page.getByRole('radio', { name: '依日期' }).check();
+  const day = page.getByLabel('查看日期');
+  await expect(day).toHaveValue('2025-02-01');
+  await expect(month(page)).toBeHidden();
+  await day.fill('2025-01-28');
+  await expect(page.getByText('當日支出', { exact: true })).toBeVisible();
+  await expect(page.getByText('當日筆數', { exact: true })).toBeVisible();
+  await expect(page.locator('#transactions tr td:first-child')).toHaveText(['2025-01-28', '2025-01-28']);
+  await expect(page.locator('#transactions tr td:nth-child(2)')).toHaveText(['轉角書店', '紙品小舖']);
+  await expect(page.locator('#month-total')).toHaveText('$145.5');
+  await expect(page.locator('#month-count')).toHaveText('2');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+  await page.getByRole('radio', { name: '依月份' }).check();
+  await expect(day).toBeHidden();
+  await expect(page.getByText('當月支出', { exact: true })).toBeVisible();
+  await expectMonth(page, '2025-01', ['轉角書店', '河岸文具', '紙品小舖'], '$158');
+});
+
+test('單日沒有紀錄時顯示空狀態，重新整理保留日期並顯示新資料', async ({ page, ledger }) => {
+  await ledger.success(entries);
+  const daily = page.getByRole('radio', { name: '依日期' });
+  const day = page.getByLabel('查看日期');
+  await daily.check();
+  await day.fill('2024-12-08');
+  await expect(page.getByText('目前沒有支出紀錄。')).toBeVisible();
+  await expect(page.locator('#transactions tr')).toHaveCount(0);
+  await expect(page.getByRole('table')).toBeHidden();
+  await expect(page.locator('#month-total')).toHaveText('$0');
+  await expect(page.locator('#month-count')).toHaveText('0');
+  await refresh(page).click();
+  await ledger.success([...entries, { ...january, date: '2024-12-08', merchant: '冬日書屋' }]);
+  await expect(refresh(page)).toBeEnabled();
+  await expect(daily).toBeChecked();
+  await expect(day).toHaveValue('2024-12-08');
+  await expect(page.getByText('目前沒有支出紀錄。')).toBeHidden();
+  await expect(page.getByRole('cell', { name: '冬日書屋' })).toBeVisible();
+  await expect(page.locator('#month-total')).toHaveText('$120');
+  await expect(page.locator('#month-count')).toHaveText('1');
+});
+
+test('重新整理後原選月份已無資料，仍保留該月並顯示空狀態', async ({ page, ledger }) => {
+  await ledger.success(entries);
+  await month(page).selectOption('2025-01');
+  await refresh(page).click();
+  await ledger.success([february]);
+  await expectMonth(page, '2025-01', [], '$0');
+  await expect(page.getByText('目前沒有支出紀錄。')).toBeVisible();
+});
+
 test('重新整理失敗時保留前次成功資料與時間', async ({ page, ledger }) => {
   await ledger.success(entries);
   await month(page).selectOption('2025-01');
