@@ -1,0 +1,11 @@
+{
+  "name": "my-account",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "test:ui": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
+  }
+}
