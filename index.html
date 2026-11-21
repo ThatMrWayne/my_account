@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {font:16px system-ui,sans-serif;color:#203631;background:#f4f6f0}
+body {max-width:1060px;margin:auto;padding:clamp(1rem,5vw,3.5rem)}
+header,.summary {display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+h1 {margin:0;font-size:clamp(2rem,6vw,3.4rem);letter-spacing:-.06em}
+h2 {margin:0;font-size:1.25rem}
+button {background:#244638;color:white;border:0;padding:.8rem 1.2rem;border-radius:.55rem;font:inherit;cursor:pointer}
+button:disabled {opacity:.65;cursor:wait}
+select {background:white;color:#203631;border:1px solid #b8c9bb;padding:.7rem .85rem;border-radius:.5rem;font:inherit}
+#status {min-height:1.5em;color:#465d51}
+.filters {display:flex;align-items:center;gap:.75rem;margin:1.5rem 0 .75rem}
+.summary {background:#e3eddf;padding:1.35rem;border-radius:.75rem;margin:1.5rem 0;justify-content:flex-start;gap:3rem}
+.summary strong {display:block;font-size:1.8rem;margin-top:.3rem}
+section {background:white;border:1px solid #dce5d9;border-radius:.75rem;padding:1.2rem}
+.scroller {overflow:auto;margin-top:1rem}
+table {width:100%;border-collapse:collapse;white-space:nowrap;font-variant-numeric:tabular-nums}
+th,td {padding:.8rem .65rem;border-bottom:1px solid #e8ece5;text-align:left}
+th {background:#f5f7f2;font-size:.88rem}
+th:nth-child(6),td:nth-child(6) {text-align:right}
+[hidden] {display:none!important}
+</style>
+</head>
+<body>
+<header><h1>個人記帳</h1><button id="refresh" type="button">重新整理</button></header>
+<p id="status" role="status">讀取中…</p>
+<main id="results" hidden>
+  <div class="filters">
+    <label for="month">查看月份</label>
+    <select id="month" aria-label="選擇月份"></select>
+  </div>
+  <div class="summary">
+    <div>當月支出<strong id="month-total"></strong></div>
+    <div>當月筆數<strong id="month-count"></strong></div>
+  </div>
+  <section aria-labelledby="entries">
+    <h2 id="entries">支出明細</h2>
+    <p id="empty" hidden>目前沒有支出紀錄。</p>
+    <div id="table-wrap" class="scroller" role="region" aria-label="支出明細表" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">日期</th><th scope="col">店家／用途</th><th scope="col">品項</th><th scope="col">分類</th><th scope="col">支付方式</th><th scope="col">金額</th><th scope="col">備註</th></tr></thead>
+        <tbody id="transactions"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+const currency = new Intl.NumberFormat('zh-TW', {style:'currency',currency:'TWD',minimumFractionDigits:0,maximumFractionDigits:2});
+const taipei = new Intl.DateTimeFormat('zh-TW', {timeZone:'Asia/Taipei',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+const refresh = byId('refresh');
+const statusLine = byId('status');
+const monthSelect = byId('month');
+let lastRead = '';
+let entries = [];
+function renderEntries() {
+  const selectedMonth = monthSelect.value;
+  const visibleEntries = entries.filter(entry => entry.date.slice(0, 7) === selectedMonth);
+  const fragment = document.createDocumentFragment();
+  for (const entry of visibleEntries) {
+    const row = document.createElement('tr');
+    for (const value of [entry.date,entry.merchant,entry.item,entry.category,entry.payment,currency.format(entry.amount),entry.note]) {
+      row.insertCell().textContent = value;
+    }
+    fragment.append(row);
+  }
+  byId('transactions').replaceChildren(fragment);
+  byId('month-total').textContent = currency.format(visibleEntries.reduce((sum, entry) => sum + entry.amount, 0));
+  byId('month-count').textContent = visibleEntries.length;
+  byId('empty').hidden = visibleEntries.length > 0;
+  byId('table-wrap').hidden = visibleEntries.length === 0;
+}
+function render(result) {
+  const previousMonth = monthSelect.value;
+  entries = result.entries;
+  const months = [...new Set(entries.map(entry => entry.date.slice(0, 7)))].sort().reverse();
+  const currentMonth = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Taipei',year:'numeric',month:'2-digit'}).format(new Date());
+  if (months.length === 0) months.push(currentMonth);
+  monthSelect.replaceChildren(...months.map(month => {
+    const option = document.createElement('option');
+    option.value = month;
+    const [year, number] = month.split('-');
+    option.textContent = year + ' 年 ' + Number(number) + ' 月';
+    return option;
+  }));
+  monthSelect.value = months.includes(previousMonth) ? previousMonth : (months.includes(currentMonth) ? currentMonth : months[0]);
+  renderEntries();
+  byId('results').hidden = false;
+  lastRead = taipei.format(new Date(result.fetchedAt));
+  statusLine.textContent = '最近讀取（台灣時間） ' + lastRead;
+  refresh.disabled = false;
+}
+function failed() {
+  statusLine.textContent = lastRead ? '更新失敗，目前顯示 ' + lastRead + ' 讀取的資料。' : '無法讀取記帳資料，請重新整理。';
+  refresh.disabled = false;
+}
+function load() {
+  refresh.disabled = true;
+  statusLine.textContent = '讀取中…';
+  google.script.run.withSuccessHandler(render).withFailureHandler(failed).readLedger();
+}
+refresh.addEventListener('click', load);
+monthSelect.addEventListener('change', renderEntries);
+load();
+</script>
+</body>
+</html>
+
+
